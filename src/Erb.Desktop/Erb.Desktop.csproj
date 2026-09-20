@@ -46,6 +46,7 @@
     <Compile Include="Domain\AuthService.cs" />
     <Compile Include="LoginForm.cs" />
     <Compile Include="UserManagementForm.cs" />
+    <Compile Include="AccessManagementForm.cs" />
     <Compile Include="Infrastructure\AppPaths.cs" />
     <Compile Include="Infrastructure\Database.cs" />
     <Compile Include="Domain\StockMovementService.cs" />
@@ -56,6 +57,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <None Include="packages.config" />
+    <Content Include="Assets\soli-medical-logo.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\soli-medical-logo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="..\..\packages\Stub.System.Data.SQLite.Core.NetFramework.1.0.118.0\build\net46\x86\SQLite.Interop.dll">
       <Link>SQLite.Interop.dll</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

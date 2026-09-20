@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using Erb.Desktop.Domain;
 using Erb.Desktop.Infrastructure;
@@ -23,12 +24,14 @@ namespace Erb.Desktop
 
         public MainForm(Database database, UserSession session)
         {
-            _database = database; _session = session; _documents = new DocumentService(database.Connection);
+            _database = database; _session = session; _documents = new DocumentService(database.Connection, session);
             Text = "ERB — إدارة مخازن المجمع الطبي | " + session.DisplayName; Width = 1240; Height = 780; StartPosition = FormStartPosition.CenterScreen; RightToLeft = RightToLeft.Yes; RightToLeftLayout = true; Font = new Font("Tahoma", 10F);
             _items = LoadTable("SELECT i.id AS item_id,i.name_ar,i.base_unit_id AS unit_id,u.name_ar AS unit_name FROM items i JOIN units u ON u.id=i.base_unit_id WHERE i.is_active=1 ORDER BY i.name_ar;");
-            _warehouses = LoadTable("SELECT id,name FROM warehouses WHERE is_active=1 ORDER BY name;"); _balanceGrid = BuildGrid(); _status = new Label { Dock = DockStyle.Bottom, Height = 32, TextAlign = ContentAlignment.MiddleRight };
+            _warehouses = LoadTable(session.IsAdmin ? "SELECT id,name FROM warehouses WHERE is_active=1 ORDER BY name;" : "SELECT w.id,w.name FROM warehouses w JOIN user_warehouses uw ON uw.warehouse_id=w.id WHERE uw.user_id=" + session.UserId + " AND w.is_active=1 ORDER BY w.name;"); _balanceGrid = BuildGrid(); _status = new Label { Dock = DockStyle.Bottom, Height = 32, TextAlign = ContentAlignment.MiddleRight };
             var header = new Panel { Dock = DockStyle.Top, Height = 78, BackColor = Color.FromArgb(33,55,82) }; var title = new Label { Text = "إدارة المخزون — Offline | " + session.RoleCode, ForeColor = Color.White, Font = new Font("Tahoma",18F,FontStyle.Bold), Dock = DockStyle.Top, Height = 46, Padding = new Padding(20,8,10,0) }; var refresh = new Button { Text = "تحديث الأرصدة", Width = 130, Height = 28, Top = 45, Left = 20 }; refresh.Click += delegate { LoadBalances(); }; header.Controls.Add(refresh);
             if (session.Can("USERS.MANAGE")) { var users = new Button { Text = "إدارة المستخدمين", Width = 140, Height = 28, Top = 45, Left = 165 }; users.Click += delegate { using (var form = new UserManagementForm(new AuthService(_database.Connection))) form.ShowDialog(this); }; header.Controls.Add(users); }
+            var logoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "soli-medical-logo.png");
+            if (File.Exists(logoPath)) { var logo = new PictureBox { Image = Image.FromFile(logoPath), SizeMode = PictureBoxSizeMode.Zoom, Width = 58, Height = 58, Top = 8, Left = 930, BackColor = Color.Transparent }; header.Controls.Add(logo); }
             header.Controls.Add(title);
             var tabs = new TabControl { Dock = DockStyle.Fill }; var balance = new TabPage("الأرصدة الحالية"); balance.Controls.Add(_balanceGrid); tabs.TabPages.Add(balance); AddMovementTab(tabs,"RECEIPT","التوريد"); AddMovementTab(tabs,"TRANSFER","التحويل بين المخازن"); AddMovementTab(tabs,"ISSUE","الصرف"); AddMovementTab(tabs,"CONSUMPTION","الاستهلاك"); tabs.SelectedIndexChanged += delegate { LoadBalances(); };
             Controls.Add(tabs); Controls.Add(_status); Controls.Add(header); Load += delegate { LoadBalances(); };
@@ -60,6 +63,6 @@ namespace Erb.Desktop
         private static ComboBox BuildCombo(DataTable t,string display,string value){var c=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,RightToLeft=RightToLeft.Yes};c.DataSource=t.Copy();c.DisplayMember=display;c.ValueMember=value;if(c.Items.Count>0)c.SelectedIndex=0;return c;}
         private static DataGridView BuildGrid(){return new DataGridView{Dock=DockStyle.Fill,ReadOnly=true,AllowUserToAddRows=false,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,BackgroundColor=Color.White,SelectionMode=DataGridViewSelectionMode.FullRowSelect};}
         private static DataGridView BuildLinesGrid(){var g=BuildGrid();g.Columns.Add(new DataGridViewTextBoxColumn{Name="item_id",Visible=false});g.Columns.Add(new DataGridViewTextBoxColumn{Name="unit_id",Visible=false});g.Columns.Add(new DataGridViewTextBoxColumn{HeaderText="الصنف",Name="item_name"});g.Columns.Add(new DataGridViewTextBoxColumn{HeaderText="الكمية",Name="quantity"});g.Columns.Add(new DataGridViewTextBoxColumn{HeaderText="الوحدة",Name="unit_name"});g.Columns.Add(new DataGridViewTextBoxColumn{HeaderText="الملاحظات",Name="notes"});return g;}
-        private void LoadBalances(){try{using(var c=_database.Connection.CreateCommand())using(var a=new SQLiteDataAdapter(c)){c.CommandText="SELECT w.name AS [المخزن],i.sku AS [SKU],i.name_ar AS [الصنف],u.name_ar AS [الوحدة],COALESCE(SUM(sm.signed_quantity),0) AS [الرصيد] FROM warehouses w CROSS JOIN items i JOIN units u ON u.id=i.base_unit_id LEFT JOIN stock_movements sm ON sm.warehouse_id=w.id AND sm.item_id=i.id WHERE w.is_active=1 AND i.is_active=1 GROUP BY w.id,i.id,u.id HAVING COALESCE(SUM(sm.signed_quantity),0)<>0 ORDER BY w.name,i.name_ar;";var t=new DataTable();a.Fill(t);_balanceGrid.DataSource=t;_status.Text="محلي بالكامل | SQLite | المستخدم: "+_session.DisplayName+" | النتائج: "+t.Rows.Count;}}catch(Exception ex){MessageBox.Show(ex.Message,"خطأ",MessageBoxButtons.OK,MessageBoxIcon.Error);}}
+        private void LoadBalances(){try{using(var c=_database.Connection.CreateCommand())using(var a=new SQLiteDataAdapter(c)){c.CommandText="SELECT w.name AS [المخزن],i.sku AS [SKU],i.name_ar AS [الصنف],u.name_ar AS [الوحدة],COALESCE(SUM(sm.signed_quantity),0) AS [الرصيد] FROM warehouses w CROSS JOIN items i JOIN units u ON u.id=i.base_unit_id LEFT JOIN stock_movements sm ON sm.warehouse_id=w.id AND sm.item_id=i.id WHERE w.is_active=1 AND i.is_active=1 "+(_session.IsAdmin?"":"AND EXISTS (SELECT 1 FROM user_warehouses uw WHERE uw.user_id="+_session.UserId+" AND uw.warehouse_id=w.id) ")+" GROUP BY w.id,i.id,u.id HAVING COALESCE(SUM(sm.signed_quantity),0)<>0 ORDER BY w.name,i.name_ar;";var t=new DataTable();a.Fill(t);_balanceGrid.DataSource=t;_status.Text="محلي بالكامل | SQLite | المستخدم: "+_session.DisplayName+" | النتائج: "+t.Rows.Count;}}catch(Exception ex){MessageBox.Show(ex.Message,"خطأ",MessageBoxButtons.OK,MessageBoxIcon.Error);}}
     }
 }

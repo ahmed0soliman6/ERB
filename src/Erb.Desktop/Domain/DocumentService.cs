@@ -30,7 +30,8 @@ namespace Erb.Desktop.Domain
     {
         private readonly SQLiteConnection _connection;
         private readonly StockMovementService _movements;
-        public DocumentService(SQLiteConnection connection) { _connection = connection; _movements = new StockMovementService(connection); }
+        private readonly UserSession _session;
+        public DocumentService(SQLiteConnection connection, UserSession session) { _connection = connection; _session = session; _movements = new StockMovementService(connection); }
 
         public DataTable ListDrafts(string kind, long userId)
         {
@@ -45,6 +46,8 @@ namespace Erb.Desktop.Domain
 
         public long SaveDraft(string kind, long documentId, long warehouseId, long destinationWarehouseId, IList<MovementLine> lines, string notes, long userId)
         {
+            EnsureWarehouse(warehouseId);
+            if (kind == "TRANSFER") EnsureWarehouse(destinationWarehouseId);
             if (lines == null || lines.Count == 0) throw new InvalidOperationException("أضف صنفًا واحدًا على الأقل قبل حفظ المسودة.");
             using (var tx = _connection.BeginTransaction())
             {
@@ -73,6 +76,8 @@ namespace Erb.Desktop.Domain
                     if (!r.Read()) throw new InvalidOperationException("المسودة غير موجودة أو لا تملك صلاحية فتحها.");
                     if (kind == "TRANSFER") { draft.SourceWarehouseId = Convert.ToInt64(r[0]); draft.DestinationWarehouseId = Convert.ToInt64(r[1]); }
                     else draft.WarehouseId = Convert.ToInt64(r[0]);
+                    EnsureWarehouse(draft.WarehouseId == 0 ? draft.SourceWarehouseId : draft.WarehouseId);
+                    if (kind == "TRANSFER") EnsureWarehouse(draft.DestinationWarehouseId);
                     draft.Notes = r[2] == DBNull.Value ? "" : Convert.ToString(r[2]);
                 }
             }
@@ -91,6 +96,8 @@ namespace Erb.Desktop.Domain
             {
                 var table = HeaderTable(kind); EnsureOwnedDraft(table, documentId, userId, tx);
                 var draft = LoadDraftWithinTransaction(kind, documentId, tx);
+                EnsureWarehouse(draft.WarehouseId == 0 ? draft.SourceWarehouseId : draft.WarehouseId);
+                if (kind == "TRANSFER") EnsureWarehouse(draft.DestinationWarehouseId);
                 if (draft.Lines.Count == 0) throw new InvalidOperationException("لا يمكن اعتماد مسودة بلا أصناف.");
                 foreach (var line in draft.Lines)
                 {
@@ -124,6 +131,7 @@ namespace Erb.Desktop.Domain
         private void DeleteLines(string table, string fk, long id, SQLiteTransaction tx) { using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "DELETE FROM " + table + " WHERE " + fk + "=@id;"; c.Parameters.AddWithValue("@id", id); c.ExecuteNonQuery(); } }
         private void InsertLine(string kind, long id, MovementLine line, SQLiteTransaction tx) { string table = LineTable(kind), fk = ForeignKey(kind), extra = kind == "RECEIPT" ? ",unit_cost,batch_no,expiry_date" : "", values = kind == "RECEIPT" ? ",NULL,NULL,NULL" : ""; using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "INSERT INTO " + table + "(" + fk + ",item_id,quantity,unit_id,notes" + extra + ") VALUES(@id,@item,@q,@unit,@notes" + values + ");"; c.Parameters.AddWithValue("@id", id); c.Parameters.AddWithValue("@item", line.ItemId); c.Parameters.AddWithValue("@q", line.Quantity); c.Parameters.AddWithValue("@unit", line.UnitId); c.Parameters.AddWithValue("@notes", (object)line.Notes ?? DBNull.Value); c.ExecuteNonQuery(); } }
         private static string HeaderTable(string kind) { return kind == "RECEIPT" ? "receipts" : kind == "TRANSFER" ? "transfers" : kind == "ISSUE" ? "issues" : "consumptions"; }
+        private void EnsureWarehouse(long warehouseId) { if (!_session.CanWarehouse(warehouseId)) throw new InvalidOperationException("لا تملك صلاحية استخدام هذا المخزن."); }
         private static string LineTable(string kind) { return kind == "RECEIPT" ? "receipt_lines" : kind == "TRANSFER" ? "transfer_lines" : kind == "ISSUE" ? "issue_lines" : "consumption_lines"; }
         private static string ForeignKey(string kind) { return kind == "RECEIPT" ? "receipt_id" : kind == "TRANSFER" ? "transfer_id" : kind == "ISSUE" ? "issue_id" : "consumption_id"; }
         private static string HeaderSelect(string kind) { return kind == "TRANSFER" ? "SELECT source_warehouse_id,destination_warehouse_id,notes FROM transfers" : "SELECT " + (kind == "RECEIPT" ? "destination_warehouse_id" : "warehouse_id") + ",0,notes FROM " + HeaderTable(kind); }

@@ -9,17 +9,20 @@ namespace Erb.Desktop.Domain
     internal sealed class UserSession
     {
         private readonly HashSet<string> _permissions;
+        private readonly HashSet<long> _warehouses;
         public long UserId { get; private set; }
         public string Username { get; private set; }
         public string DisplayName { get; private set; }
         public string RoleCode { get; private set; }
         public bool IsAdmin { get { return string.Equals(RoleCode, "ADMIN", StringComparison.OrdinalIgnoreCase); } }
-        public UserSession(long userId, string username, string displayName, string roleCode, IEnumerable<string> permissions)
+        public UserSession(long userId, string username, string displayName, string roleCode, IEnumerable<string> permissions, IEnumerable<long> warehouses)
         {
             UserId = userId; Username = username; DisplayName = displayName; RoleCode = roleCode;
             _permissions = new HashSet<string>(permissions, StringComparer.OrdinalIgnoreCase);
+            _warehouses = new HashSet<long>(warehouses);
         }
         public bool Can(string permission) { return IsAdmin || _permissions.Contains(permission); }
+        public bool CanWarehouse(long warehouseId) { return IsAdmin || _warehouses.Contains(warehouseId); }
     }
 
     internal sealed class AuthService
@@ -64,7 +67,7 @@ namespace Erb.Desktop.Domain
                     var salt = (byte[])r[4]; var expected = (byte[])r[3]; byte[] actual;
                     using (var pbkdf = new Rfc2898DeriveBytes(password, salt, Iterations)) actual = pbkdf.GetBytes(expected.Length);
                     if (!FixedEquals(expected, actual)) throw new InvalidOperationException("اسم المستخدم أو كلمة المرور غير صحيحة.");
-                    var session = new UserSession(Convert.ToInt64(r[0]), Convert.ToString(r[1]), Convert.ToString(r[2]), LoadRole(Convert.ToInt64(r[0])), LoadPermissions(Convert.ToInt64(r[0])));
+                    var session = new UserSession(Convert.ToInt64(r[0]), Convert.ToString(r[1]), Convert.ToString(r[2]), LoadRole(Convert.ToInt64(r[0])), LoadPermissions(Convert.ToInt64(r[0])), LoadWarehouses(Convert.ToInt64(r[0])));
                     r.Close();
                     using (var update = _connection.CreateCommand()) { update.CommandText = "UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=@id;"; update.Parameters.AddWithValue("@id", session.UserId); update.ExecuteNonQuery(); }
                     return session;
@@ -101,6 +104,63 @@ namespace Erb.Desktop.Domain
             using (var c = _connection.CreateCommand()) { c.CommandText = "UPDATE users SET is_active=CASE is_active WHEN 1 THEN 0 ELSE 1 END,updated_at=CURRENT_TIMESTAMP WHERE id=@id;"; c.Parameters.AddWithValue("@id", userId); c.ExecuteNonQuery(); }
         }
 
+        public System.Data.DataTable ListWarehouses()
+        {
+            var table = new System.Data.DataTable();
+            using (var c = _connection.CreateCommand()) using (var a = new SQLiteDataAdapter(c)) { c.CommandText = "SELECT id,name FROM warehouses WHERE is_active=1 ORDER BY name;"; a.Fill(table); }
+            return table;
+        }
+
+        public System.Data.DataTable ListRoles()
+        {
+            var table = new System.Data.DataTable();
+            using (var c = _connection.CreateCommand()) using (var a = new SQLiteDataAdapter(c)) { c.CommandText = "SELECT id,code,name FROM roles ORDER BY id;"; a.Fill(table); }
+            return table;
+        }
+
+        public System.Data.DataTable ListPermissions()
+        {
+            var table = new System.Data.DataTable();
+            using (var c = _connection.CreateCommand()) using (var a = new SQLiteDataAdapter(c)) { c.CommandText = "SELECT id,code,name FROM permissions ORDER BY code;"; a.Fill(table); }
+            return table;
+        }
+
+        public HashSet<long> GetUserWarehouses(long userId)
+        {
+            var result = new HashSet<long>();
+            using (var c = _connection.CreateCommand()) { c.CommandText = "SELECT warehouse_id FROM user_warehouses WHERE user_id=@u;"; c.Parameters.AddWithValue("@u", userId); using (var r = c.ExecuteReader()) while (r.Read()) result.Add(Convert.ToInt64(r[0])); }
+            return result;
+        }
+
+        public HashSet<string> GetRolePermissions(string roleCode)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var c = _connection.CreateCommand()) { c.CommandText = "SELECT p.code FROM permissions p JOIN role_permissions rp ON rp.permission_id=p.id JOIN roles r ON r.id=rp.role_id WHERE r.code=@r;"; c.Parameters.AddWithValue("@r", roleCode); using (var reader = c.ExecuteReader()) while (reader.Read()) result.Add(Convert.ToString(reader[0])); }
+            return result;
+        }
+
+        public void SetUserWarehouses(long userId, IEnumerable<long> warehouseIds)
+        {
+            using (var tx = _connection.BeginTransaction())
+            {
+                using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "DELETE FROM user_warehouses WHERE user_id=@u;"; c.Parameters.AddWithValue("@u", userId); c.ExecuteNonQuery(); }
+                foreach (var warehouseId in warehouseIds) using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "INSERT INTO user_warehouses(user_id,warehouse_id) VALUES(@u,@w);"; c.Parameters.AddWithValue("@u", userId); c.Parameters.AddWithValue("@w", warehouseId); c.ExecuteNonQuery(); }
+                tx.Commit();
+            }
+        }
+
+        public void SetRolePermissions(string roleCode, IEnumerable<string> permissionCodes)
+        {
+            using (var tx = _connection.BeginTransaction())
+            {
+                long roleId;
+                using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "SELECT id FROM roles WHERE code=@r;"; c.Parameters.AddWithValue("@r", roleCode); roleId = Convert.ToInt64(c.ExecuteScalar()); }
+                using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "DELETE FROM role_permissions WHERE role_id=@r;"; c.Parameters.AddWithValue("@r", roleId); c.ExecuteNonQuery(); }
+                foreach (var code in permissionCodes) using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "INSERT INTO role_permissions(role_id,permission_id) SELECT @r,id FROM permissions WHERE code=@p;"; c.Parameters.AddWithValue("@r", roleId); c.Parameters.AddWithValue("@p", code); c.ExecuteNonQuery(); }
+                tx.Commit();
+            }
+        }
+
         private string LoadRole(long userId)
         {
             using (var c = _connection.CreateCommand()) { c.CommandText = "SELECT COALESCE((SELECT r.code FROM roles r JOIN user_roles ur ON ur.role_id=r.id WHERE ur.user_id=@u LIMIT 1),'VIEWER');"; c.Parameters.AddWithValue("@u", userId); return Convert.ToString(c.ExecuteScalar()); }
@@ -111,6 +171,13 @@ namespace Erb.Desktop.Domain
             using (var c = _connection.CreateCommand()) { c.CommandText = "SELECT p.code FROM permissions p JOIN role_permissions rp ON rp.permission_id=p.id JOIN user_roles ur ON ur.role_id=rp.role_id WHERE ur.user_id=@u;"; c.Parameters.AddWithValue("@u", userId); using (var r = c.ExecuteReader()) while (r.Read()) result.Add(Convert.ToString(r[0])); }
             return result;
         }
+        private List<long> LoadWarehouses(long userId)
+        {
+            var result = new List<long>();
+            using (var c = _connection.CreateCommand()) { c.CommandText = "SELECT warehouse_id FROM user_warehouses WHERE user_id=@u;"; c.Parameters.AddWithValue("@u", userId); using (var r = c.ExecuteReader()) while (r.Read()) result.Add(Convert.ToInt64(r[0])); }
+            return result;
+        }
+
         private void SeedPermissions()
         {
             var permissions = new[] { "RECEIPTS.CREATE", "RECEIPTS.APPROVE", "TRANSFERS.CREATE", "TRANSFERS.APPROVE", "ISSUES.CREATE", "ISSUES.APPROVE", "CONSUMPTIONS.CREATE", "CONSUMPTIONS.APPROVE", "REPORTS.VIEW", "USERS.MANAGE", "BACKUP.CREATE" };

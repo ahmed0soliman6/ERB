@@ -23,6 +23,7 @@ namespace Erb.Desktop
             _role.SetBounds(530, 10, 180, 28); _role.DropDownStyle = ComboBoxStyle.DropDownList; _role.Items.Add(new RoleOption("ADMIN", "مسؤول النظام")); _role.Items.Add(new RoleOption("STORE_MANAGER", "مدير مخزن")); _role.Items.Add(new RoleOption("STORE_USER", "مستخدم مخزن")); _role.Items.Add(new RoleOption("VIEWER", "مشاهد")); _role.SelectedIndex = 1; panel.Controls.Add(_role);
             var create = new Button { Text = "إضافة مستخدم", Left = 530, Top = 48, Width = 110 }; create.Click += delegate { Create(); }; panel.Controls.Add(create);
             var toggle = new Button { Text = "تفعيل/تعطيل المحدد", Left = 650, Top = 48, Width = 150 }; toggle.Click += delegate { Toggle(); }; panel.Controls.Add(toggle);
+            var access = new Button { Text = "المخازن والصلاحيات", Left = 530, Top = 86, Width = 180 }; access.Click += delegate { using (var form = new AccessManagementForm(_auth)) form.ShowDialog(this); }; panel.Controls.Add(access);
             Controls.Add(_grid); Controls.Add(panel); Load += delegate { RefreshUsers(); };
         }
         private static void AddLabel(Control parent, string text, TextBox box, int top) { parent.Controls.Add(new Label { Text = text, AutoSize = true, Left = 10, Top = top + 6 }); box.SetBounds(110, top, 300, 28); parent.Controls.Add(box); }
