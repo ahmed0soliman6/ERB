@@ -118,6 +118,9 @@ namespace Erb.Desktop.Domain
             {
                 foreach (var p in permissions) using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "INSERT OR IGNORE INTO permissions(code,name) VALUES(@c,@n);"; c.Parameters.AddWithValue("@c", p); c.Parameters.AddWithValue("@n", p); c.ExecuteNonQuery(); }
                 using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT r.id,p.id FROM roles r CROSS JOIN permissions p WHERE r.code='ADMIN';"; c.ExecuteNonQuery(); }
+                using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT r.id,p.id FROM roles r JOIN permissions p ON p.code IN ('RECEIPTS.CREATE','TRANSFERS.CREATE','ISSUES.CREATE','CONSUMPTIONS.CREATE','REPORTS.VIEW') WHERE r.code='STORE_MANAGER';"; c.ExecuteNonQuery(); }
+                using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT r.id,p.id FROM roles r JOIN permissions p ON p.code IN ('RECEIPTS.CREATE','TRANSFERS.CREATE','ISSUES.CREATE','CONSUMPTIONS.CREATE') WHERE r.code='STORE_USER';"; c.ExecuteNonQuery(); }
+                using (var c = _connection.CreateCommand()) { c.Transaction = tx; c.CommandText = "INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT r.id,p.id FROM roles r JOIN permissions p ON p.code='REPORTS.VIEW' WHERE r.code='VIEWER';"; c.ExecuteNonQuery(); }
                 tx.Commit();
             }
         }
