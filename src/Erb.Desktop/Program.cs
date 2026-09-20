@@ -1,5 +1,7 @@
 using System;
 using System.Windows.Forms;
+using Erb.Desktop.Domain;
+using Erb.Desktop.Infrastructure;
 
 namespace Erb.Desktop
 {
@@ -14,7 +16,15 @@ namespace Erb.Desktop
             {
                 MessageBox.Show(args.Exception.Message, "خطأ في النظام", MessageBoxButtons.OK, MessageBoxIcon.Error);
             };
-            Application.Run(new MainForm());
+            using (var database = new Database())
+            {
+                var auth = new AuthService(database.Connection);
+                using (var login = new LoginForm(auth))
+                {
+                    if (login.ShowDialog() != DialogResult.OK) return;
+                    Application.Run(new MainForm(database, login.Session));
+                }
+            }
         }
     }
 }

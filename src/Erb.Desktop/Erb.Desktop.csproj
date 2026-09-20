@@ -43,6 +43,9 @@
     <Compile Include="Program.cs" />
     <Compile Include="MainForm.cs" />
     <Compile Include="Domain\DocumentService.cs" />
+    <Compile Include="Domain\AuthService.cs" />
+    <Compile Include="LoginForm.cs" />
+    <Compile Include="UserManagementForm.cs" />
     <Compile Include="Infrastructure\AppPaths.cs" />
     <Compile Include="Infrastructure\Database.cs" />
     <Compile Include="Domain\StockMovementService.cs" />
