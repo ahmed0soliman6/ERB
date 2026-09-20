@@ -47,8 +47,11 @@
     <Compile Include="LoginForm.cs" />
     <Compile Include="UserManagementForm.cs" />
     <Compile Include="AccessManagementForm.cs" />
+    <Compile Include="ReportsForm.cs" />
+    <Compile Include="BackupForm.cs" />
     <Compile Include="Infrastructure\AppPaths.cs" />
     <Compile Include="Infrastructure\Database.cs" />
+    <Compile Include="Infrastructure\BackupService.cs" />
     <Compile Include="Domain\StockMovementService.cs" />
   </ItemGroup>
   <ItemGroup>

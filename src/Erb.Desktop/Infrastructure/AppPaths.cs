@@ -16,6 +16,7 @@ namespace Erb.Desktop.Infrastructure
         }
 
         public static string DatabaseFile { get { return Path.Combine(Root, "inventory.db"); } }
+        public static string PendingRestoreFile { get { return Path.Combine(Root, "inventory.restore.pending.db"); } }
         public static string BackupDirectory
         {
             get
