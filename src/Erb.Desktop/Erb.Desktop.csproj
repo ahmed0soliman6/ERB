@@ -6,7 +6,7 @@
     <ProjectGuid>{B4E5E511-3F36-4FD9-8D1D-ACB731E1F0D4}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>Erb.Desktop</RootNamespace>
-    <AssemblyName>Erb.Desktop</AssemblyName>
+    <AssemblyName>SoliMedical-ERB</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <TargetFrameworkProfile />
     <Prefer32Bit>true</Prefer32Bit>
@@ -53,6 +53,8 @@
     <Compile Include="Infrastructure\Database.cs" />
     <Compile Include="Infrastructure\BackupService.cs" />
     <Compile Include="Domain\StockMovementService.cs" />
+    <Compile Include="Domain\AlertService.cs" />
+    <Compile Include="AlertsForm.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

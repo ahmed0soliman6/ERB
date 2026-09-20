@@ -17,6 +17,8 @@ namespace Erb.Desktop
         private readonly UserSession _session;
         private readonly DataGridView _balanceGrid;
         private readonly Label _status;
+        private readonly Label _alertBar = new Label();
+        private readonly Button _alertsButton = new Button();
         private readonly DataTable _items;
         private readonly DataTable _warehouses;
         private readonly Dictionary<TabPage, MovementTabState> _tabs = new Dictionary<TabPage, MovementTabState>();
@@ -25,18 +27,20 @@ namespace Erb.Desktop
         public MainForm(Database database, UserSession session)
         {
             _database = database; _session = session; _documents = new DocumentService(database.Connection, session);
-            Text = "ERB — إدارة مخازن المجمع الطبي | " + session.DisplayName; Width = 1240; Height = 780; StartPosition = FormStartPosition.CenterScreen; RightToLeft = RightToLeft.Yes; RightToLeftLayout = true; Font = new Font("Tahoma", 10F);
+            Text = "SoliMedical-ERB — إدارة مخازن المجمع الطبي | " + session.DisplayName; Width = 1240; Height = 780; StartPosition = FormStartPosition.CenterScreen; RightToLeft = RightToLeft.Yes; RightToLeftLayout = true; Font = new Font("Tahoma", 10F);
             _items = LoadTable("SELECT i.id AS item_id,i.name_ar,i.base_unit_id AS unit_id,u.name_ar AS unit_name FROM items i JOIN units u ON u.id=i.base_unit_id WHERE i.is_active=1 ORDER BY i.name_ar;");
             _warehouses = LoadTable(session.IsAdmin ? "SELECT id,name FROM warehouses WHERE is_active=1 ORDER BY name;" : "SELECT w.id,w.name FROM warehouses w JOIN user_warehouses uw ON uw.warehouse_id=w.id WHERE uw.user_id=" + session.UserId + " AND w.is_active=1 ORDER BY w.name;"); _balanceGrid = BuildGrid(); _status = new Label { Dock = DockStyle.Bottom, Height = 32, TextAlign = ContentAlignment.MiddleRight };
-            var header = new Panel { Dock = DockStyle.Top, Height = 78, BackColor = Color.FromArgb(33,55,82) }; var title = new Label { Text = "إدارة المخزون — Offline | " + session.RoleCode, ForeColor = Color.White, Font = new Font("Tahoma",18F,FontStyle.Bold), Dock = DockStyle.Top, Height = 46, Padding = new Padding(20,8,10,0) }; var refresh = new Button { Text = "تحديث الأرصدة", Width = 130, Height = 28, Top = 45, Left = 20 }; refresh.Click += delegate { LoadBalances(); }; header.Controls.Add(refresh);
+            var header = new Panel { Dock = DockStyle.Top, Height = 78, BackColor = Color.FromArgb(15, 38, 63) }; var title = new Label { Text = "SoliMedical-ERB | إدارة المخزون — Offline | " + session.RoleCode, ForeColor = Color.White, Font = new Font("Tahoma",18F,FontStyle.Bold), Dock = DockStyle.Top, Height = 46, Padding = new Padding(20,8,10,0) }; var refresh = new Button { Text = "تحديث الأرصدة", Width = 130, Height = 28, Top = 45, Left = 20 }; refresh.Click += delegate { LoadBalances(); RefreshAlerts(); }; header.Controls.Add(refresh);
             if (session.Can("USERS.MANAGE")) { var users = new Button { Text = "إدارة المستخدمين", Width = 140, Height = 28, Top = 45, Left = 165 }; users.Click += delegate { using (var form = new UserManagementForm(new AuthService(_database.Connection))) form.ShowDialog(this); }; header.Controls.Add(users); }
             if (session.Can("REPORTS.VIEW")) { var reports = new Button { Text = "التقارير والتحليلات", Width = 150, Height = 28, Top = 45, Left = 315 }; reports.Click += delegate { using (var form = new ReportsForm(_database.Connection, _session)) form.ShowDialog(this); }; header.Controls.Add(reports); }
             if (session.Can("BACKUP.CREATE")) { var backups = new Button { Text = "النسخ والاستعادة", Width = 140, Height = 28, Top = 45, Left = 475 }; backups.Click += delegate { using (var form = new BackupForm(_database.Connection)) form.ShowDialog(this); }; header.Controls.Add(backups); }
+            _alertsButton.Text = "التنبيهات"; _alertsButton.Width = 110; _alertsButton.Height = 28; _alertsButton.Top = 45; _alertsButton.Left = 625; _alertsButton.FlatStyle = FlatStyle.Flat; _alertsButton.Click += delegate { using (var form = new AlertsForm(_database.Connection, _session)) form.ShowDialog(this); RefreshAlerts(); }; header.Controls.Add(_alertsButton);
             var logoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "soli-medical-logo.png");
             if (File.Exists(logoPath)) { var logo = new PictureBox { Image = Image.FromFile(logoPath), SizeMode = PictureBoxSizeMode.Zoom, Width = 58, Height = 58, Top = 8, Left = 930, BackColor = Color.Transparent }; header.Controls.Add(logo); }
             header.Controls.Add(title);
             var tabs = new TabControl { Dock = DockStyle.Fill }; var balance = new TabPage("الأرصدة الحالية"); balance.Controls.Add(_balanceGrid); tabs.TabPages.Add(balance); AddMovementTab(tabs,"RECEIPT","التوريد"); AddMovementTab(tabs,"TRANSFER","التحويل بين المخازن"); AddMovementTab(tabs,"ISSUE","الصرف"); AddMovementTab(tabs,"CONSUMPTION","الاستهلاك"); tabs.SelectedIndexChanged += delegate { LoadBalances(); };
-            Controls.Add(tabs); Controls.Add(_status); Controls.Add(header); Load += delegate { LoadBalances(); };
+            _alertBar.Dock = DockStyle.Top; _alertBar.Height = 34; _alertBar.Padding = new Padding(16, 7, 10, 0); _alertBar.Font = new Font("Tahoma", 10F, FontStyle.Bold); _alertBar.BackColor = Color.FromArgb(236, 253, 245); _alertBar.ForeColor = Color.FromArgb(6, 95, 70);
+            Controls.Add(tabs); Controls.Add(_status); Controls.Add(_alertBar); Controls.Add(header); Load += delegate { LoadBalances(); RefreshAlerts(); };
         }
 
         private void AddMovementTab(TabControl tabs, string kind, string title)
@@ -61,6 +65,7 @@ namespace Erb.Desktop
         private void ApproveDraft(MovementTabState s) { try { if(s.DocumentId==0){SaveDraft(s); if(s.DocumentId==0)return;} if(MessageBox.Show("اعتماد المسودة وإنشاء حركات المخزون؟","تأكيد الاعتماد",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return; _documents.ApproveDraft(s.Kind,s.DocumentId,_session.UserId); _status.Text="تم اعتماد المستند رقم "+s.DocumentId; s.DocumentId=0;s.Lines.Rows.Clear();s.Notes.Clear();LoadDrafts(s);LoadBalances(); } catch(Exception ex){MessageBox.Show(ex.Message,"تعذر اعتماد المسودة",MessageBoxButtons.OK,MessageBoxIcon.Warning);} }
         private static void SelectDraft(MovementTabState s,long id){ for(int i=0;i<s.Drafts.Items.Count;i++){s.Drafts.SelectedIndex=i;if(Convert.ToInt64(s.Drafts.SelectedValue)==id)return;} }
         private static long GetWarehouse(ComboBox c){if(c==null||c.SelectedIndex<0)throw new InvalidOperationException("اختر المخزن.");return Convert.ToInt64(c.SelectedValue);}
+        private void RefreshAlerts(){try{var count=new AlertService(_database.Connection,_session).Count();_alertsButton.Text=count==0?"التنبيهات":"التنبيهات ("+count+")";_alertsButton.BackColor=count==0?Color.FromArgb(226,232,240):Color.FromArgb(254,215,170);_alertBar.BackColor=count==0?Color.FromArgb(236,253,245):Color.FromArgb(255,247,237);_alertBar.ForeColor=count==0?Color.FromArgb(6,95,70):Color.FromArgb(154,52,18);_alertBar.Text=count==0?"✓ لا توجد تنبيهات مخزون حالية — الأرصدة ضمن الحدود المحددة.":"⚠ يوجد "+count+" تنبيه مخزون: أصناف عند حد الطلب أو الحد الأدنى. اضغط «التنبيهات» للتفاصيل.";}catch{_alertBar.Text="تعذر تحميل تنبيهات المخزون.";}}
         private DataTable LoadTable(string sql){using(var c=_database.Connection.CreateCommand())using(var a=new SQLiteDataAdapter(c)){c.CommandText=sql;var t=new DataTable();a.Fill(t);return t;}}
         private static ComboBox BuildCombo(DataTable t,string display,string value){var c=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,RightToLeft=RightToLeft.Yes};c.DataSource=t.Copy();c.DisplayMember=display;c.ValueMember=value;if(c.Items.Count>0)c.SelectedIndex=0;return c;}
         private static DataGridView BuildGrid(){return new DataGridView{Dock=DockStyle.Fill,ReadOnly=true,AllowUserToAddRows=false,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,BackgroundColor=Color.White,SelectionMode=DataGridViewSelectionMode.FullRowSelect};}

@@ -17,7 +17,7 @@ namespace Erb.Desktop
         public LoginForm(AuthService auth)
         {
             _auth = auth;
-            Text = "ERB — تسجيل الدخول";
+            Text = "SoliMedical-ERB — تسجيل الدخول";
             Width = 430; Height = 330; StartPosition = FormStartPosition.CenterScreen;
             RightToLeft = RightToLeft.Yes; RightToLeftLayout = true; Font = new Font("Tahoma", 10F);
             BuildLogin();

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS items (
     base_unit_id INTEGER NOT NULL REFERENCES units(id),
     notes TEXT,
     minimum_stock NUMERIC NOT NULL DEFAULT 0 CHECK (minimum_stock >= 0),
+    reorder_point NUMERIC NOT NULL DEFAULT 0 CHECK (reorder_point >= 0),
     expiry_tracking INTEGER NOT NULL DEFAULT 0 CHECK (expiry_tracking IN (0,1)),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

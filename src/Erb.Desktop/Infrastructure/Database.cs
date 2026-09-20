@@ -38,6 +38,16 @@ namespace Erb.Desktop.Infrastructure
                 command.CommandText = File.ReadAllText(schemaPath, Encoding.UTF8);
                 command.ExecuteNonQuery();
             }
+            using (var check = _connection.CreateCommand())
+            {
+                check.CommandText = "PRAGMA table_info(items);";
+                var hasReorderPoint = false;
+                using (var reader = check.ExecuteReader()) while (reader.Read()) if (string.Equals(Convert.ToString(reader[1]), "reorder_point", StringComparison.OrdinalIgnoreCase)) hasReorderPoint = true;
+                if (!hasReorderPoint)
+                {
+                    using (var alter = _connection.CreateCommand()) { alter.CommandText = "ALTER TABLE items ADD COLUMN reorder_point NUMERIC NOT NULL DEFAULT 0;"; alter.ExecuteNonQuery(); }
+                }
+            }
         }
 
         public SQLiteTransaction BeginTransaction()
