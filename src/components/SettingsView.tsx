@@ -31,6 +31,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ db, user, onRefresh,
         db.users[userIndex].display_name = displayName;
         saveDB(db);
 
+
         // Update session storage to prevent stale data on reload
         const sessionToken = sessionStorage.getItem('solimedical_session');
         if (sessionToken) {
@@ -46,6 +47,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ db, user, onRefresh,
         // Notify parent components
         onUserUpdate(db.users[userIndex]);
         onRefresh();
+
 
         setSuccessMsg('تم تحديث إعدادات الحساب بنجاح.');
         setTimeout(() => setSuccessMsg(''), 3000);
@@ -109,6 +111,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ db, user, onRefresh,
               />
               <p className="text-[10px] font-bold text-slate-400 mt-1">هذا هو الاسم الذي يظهر في لوحة التحكم والتقارير.</p>
             </div>
+
 
             <div>
               <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">دور المستخدم</label>
