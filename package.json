@@ -2,11 +2,17 @@
   "name": "solimedical-erb",
   "version": "1.0.0",
   "type": "module",
+  "description": "نظام إدارة وتتبع مستودعات المجمع الطبي - إصدار سطح المكتب ويندوز",
+  "main": "electron/main.cjs",
+  "homepage": "./",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "vite",
+    "electron:build": "npm run build && electron-builder --win",
+    "electron:build:all": "npm run build && electron-builder --win --x64 --ia32"
   },
   "dependencies": {
     "lucide-react": "^0.446.0",
@@ -19,8 +25,53 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.2",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.6.2",
     "vite": "^5.4.8"
+  },
+  "build": {
+    "appId": "com.solimedical.erb",
+    "productName": "SoliMedical-ERB",
+    "copyright": "Copyright © 2026 SoliMedical ERB. All rights reserved.",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/favicon.ico",
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SoliMedical ERB"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    }
   }
 }

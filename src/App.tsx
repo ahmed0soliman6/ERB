@@ -88,6 +88,10 @@ export default function App() {
     if (savedUser && loadedDb) {
       setCurrentUser(JSON.parse(savedUser));
     }
+
+    if (localStorage.getItem('solimedical_low_spec_mode') === 'true') {
+      document.documentElement.classList.add('low-spec-mode');
+    }
   }, []);
 
   // Compute stock levels from movements ledger whenever DB changes
@@ -262,7 +266,7 @@ export default function App() {
     { id: 'reports', name: 'التقارير والتحليلات', icon: <BarChart2 size={18} /> },
     { id: 'users', name: 'المستخدمين والصلاحيات', icon: <Users size={18} /> },
     { id: 'settings', name: 'الإعدادات والحساب', icon: <Settings size={18} /> },
-    { id: 'backups', name: 'الأمن، النسخ والترخيص', icon: <Database size={18} /> },
+    { id: 'backups', name: 'قاعدة بيانات SQL والترخيص', icon: <Database size={18} /> },
   ];
 
   return (

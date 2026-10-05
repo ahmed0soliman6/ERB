@@ -32,3 +32,13 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background-color: #475569;
 }
+
+/* Low-End PC Hardware Performance Optimization Mode */
+.low-spec-mode * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+

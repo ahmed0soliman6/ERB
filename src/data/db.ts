@@ -323,21 +323,26 @@ const initialUsers: User[] = [
 const defaultLicenseState: LocalLicenseState = {
   last_seen_utc: new Date().toISOString(),
   last_seen_local_date: new Date().toLocaleDateString('en-US'),
-  last_license_id: 'SOLI-TRIAL-8572',
+  last_license_id: 'SOLI-TRIAL-30D',
   clock_warning_status: false,
   updated_at: new Date().toISOString()
 };
 
+// Default 1-Month Trial License (30 Days)
+const trialIssueDate = new Date();
+const trialExpiryDate = new Date();
+trialExpiryDate.setDate(trialExpiryDate.getDate() + 30); // Exactly 1 month trial
+
 const defaultLicenseRecord: LicenseRecord = {
   id: 1,
-  license_id: 'SOLI-TRIAL-8572',
+  license_id: 'SOLI-TRIAL-30D',
   customer_id: 'ahmed0soliman6@gmail.com',
   license_type: 'TRIAL',
-  issue_date: '2026-09-01',
-  expiry_date: '2027-09-01', // Valid for a year in the future
-  raw_payload: 'SIGNED_PAYLOAD_TRIAL',
+  issue_date: trialIssueDate.toISOString().split('T')[0],
+  expiry_date: trialExpiryDate.toISOString().split('T')[0], // Valid for exactly 1 month
+  raw_payload: 'SIGNED_PAYLOAD_TRIAL_30D',
   status: 'ACTIVE',
-  activated_at: '2026-09-01T08:00:00Z'
+  activated_at: trialIssueDate.toISOString()
 };
 
 import { hospitalCategories, hospitalUnits, generateHospitalInventory } from './hospitalData';
@@ -868,4 +873,51 @@ export function verifyLicenseKey(licenseKey: string): { isValid: boolean; payloa
       raw_payload: licenseKey
     }
   };
+}
+
+export function extendSystemLicense(db: DBSchema, monthsToAdd: number, licenseType: 'TRIAL' | 'COMMERCIAL' | 'UNLIMITED' = 'COMMERCIAL', adminName: string = 'admin'): LicenseRecord {
+  const currentLic = db.license_records[db.license_records.length - 1] || defaultLicenseRecord;
+  const currentExpiry = new Date(currentLic.expiry_date);
+  const now = new Date();
+  
+  // Base date is max of (currentExpiry, now)
+  const baseDate = currentExpiry.getTime() > now.getTime() ? currentExpiry : now;
+  const newExpiry = new Date(baseDate);
+
+  if (licenseType === 'UNLIMITED') {
+    newExpiry.setFullYear(newExpiry.getFullYear() + 20); // 20 years lifetime
+  } else {
+    newExpiry.setMonth(newExpiry.getMonth() + monthsToAdd);
+  }
+
+  const nextId = db.license_records.length > 0 ? Math.max(...db.license_records.map(l => l.id)) + 1 : 1;
+  const newRecord: LicenseRecord = {
+    id: nextId,
+    license_id: `SOLI-${licenseType}-${Date.now().toString().slice(-6)}`,
+    customer_id: currentLic.customer_id || 'ahmed0soliman6@gmail.com',
+    license_type: licenseType,
+    issue_date: now.toISOString().split('T')[0],
+    expiry_date: newExpiry.toISOString().split('T')[0],
+    raw_payload: `EXTENDED_${licenseType}_${monthsToAdd}M`,
+    status: 'ACTIVE',
+    activated_at: now.toISOString()
+  };
+
+  db.license_records.push(newRecord);
+  db.license_state.last_license_id = newRecord.license_id;
+  db.license_state.updated_at = now.toISOString();
+
+  // Audit log
+  db.audit_logs.push({
+    id: db.audit_logs.length > 0 ? Math.max(...db.audit_logs.map(a => a.id)) + 1 : 1,
+    user_id: 1,
+    username: adminName,
+    action: `تجديد ترخيص النظام (+${monthsToAdd} شهر)`,
+    entity_type: 'ترخيص البرنامج',
+    entity_id: nextId,
+    occurred_at: now.toISOString()
+  });
+
+  saveDB(db);
+  return newRecord;
 }

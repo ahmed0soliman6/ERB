@@ -1,6 +1,25 @@
-packages/
-src/Erb.Desktop/bin/
-src/Erb.Desktop/obj/
-*.user
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+release/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
 *.suo
-.vs/
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
