@@ -4,3 +4,5 @@ src/Erb.Desktop/obj/
 *.user
 *.suo
 .vs/
+node_modules/
+.vite/
