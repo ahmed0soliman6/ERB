@@ -1,0 +1,8 @@
+{
+  "name": "SoliMedical-ERB",
+  "description": "نظام إدارة مخازن المجمع الطبي المتكامل - إدارة التوريد، التحويل، الصرف، الاستهلاك، الجرد والتنبيهات الفورية",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
