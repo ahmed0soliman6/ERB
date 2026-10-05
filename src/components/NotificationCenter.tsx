@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { 
   Bell, AlertTriangle, CalendarX, ArrowDownLeft, RefreshCw, 
-  ChevronLeft, X, Filter, Download, Package, ShieldAlert, CheckCircle2, Clock
+  ChevronLeft, X, Filter, Download, Package, ShieldAlert, CheckCircle2, Clock,
+  KeyRound, Lock, ShieldCheck, Key
 } from 'lucide-react';
 import { DBSchema } from '../data/db';
-import { computeSmartNotifications, StockAlert, ExpiryAlert } from '../utils/alertEngine';
+import { computeSmartNotifications, StockAlert, ExpiryAlert, LicenseAlert } from '../utils/alertEngine';
 
 interface NotificationCenterProps {
   db: DBSchema;
@@ -20,17 +21,21 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   onNavigate
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'ALL' | 'REORDER' | 'EXPIRY'>('ALL');
+  const [activeTab, setActiveTab] = useState<'ALL' | 'LICENSE' | 'REORDER' | 'EXPIRY'>('ALL');
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const [searchTerm, setSearchQuery] = useState('');
 
-  // Compute live smart alerts
+  // Compute live smart alerts (including proactive 30-day license expiry)
   const rawSummary = computeSmartNotifications(
     db,
     stockBalances,
     user.role,
     user.allowed_warehouses
   );
+
+  // License Alert check
+  const hasActiveLicenseAlert = rawSummary.licenseAlert && !dismissedIds.includes(rawSummary.licenseAlert.id);
+  const activeLicenseAlert = hasActiveLicenseAlert ? rawSummary.licenseAlert : null;
 
   // Filter out dismissed notifications
   const activeReorderAlerts = rawSummary.reorderAlerts.filter(a => !dismissedIds.includes(a.id));
@@ -52,9 +57,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     a.warehouseName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const totalActiveCount = activeReorderAlerts.length + activeExpiryAlerts.length;
+  const totalActiveCount = activeReorderAlerts.length + activeExpiryAlerts.length + (activeLicenseAlert ? 1 : 0);
   const criticalCount = activeReorderAlerts.filter(a => a.severity === 'CRITICAL').length + 
-                       activeExpiryAlerts.filter(a => a.severity === 'CRITICAL').length;
+                       activeExpiryAlerts.filter(a => a.severity === 'CRITICAL').length +
+                       (activeLicenseAlert && activeLicenseAlert.severity === 'CRITICAL' ? 1 : 0);
 
   const handleDismiss = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -62,13 +68,29 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   };
 
   const handleDismissAll = () => {
-    const allIds = [...activeReorderAlerts.map(a => a.id), ...activeExpiryAlerts.map(a => a.id)];
+    const allIds = [
+      ...activeReorderAlerts.map(a => a.id), 
+      ...activeExpiryAlerts.map(a => a.id),
+      ...(activeLicenseAlert ? [activeLicenseAlert.id] : [])
+    ];
     setDismissedIds(prev => [...prev, ...allIds]);
   };
 
   const handleExportAlertsCSV = () => {
-    const headers = ['نوع التنبيه', 'درجة الأهمية', 'اسم الصنف', 'الكود SKU', 'المستودع', 'التفاصيل والتشغيلة', 'الإجراء المطلوب'];
+    const headers = ['نوع التنبيه', 'درجة الأهمية', 'اسم الصنف / الكيان', 'الكود / المعرف', 'المستودع / النطاق', 'التفاصيل والتشغيلة / الصلاحية', 'الإجراء المطلوب'];
     const rows: string[][] = [];
+
+    if (activeLicenseAlert) {
+      rows.push([
+        activeLicenseAlert.type === 'LICENSE_EXPIRED' ? 'انتهاء الترخيص' : 'قرب انتهاء ترخيص النظام',
+        activeLicenseAlert.severity === 'CRITICAL' ? 'حرج جـداً' : 'تحذير استباقي',
+        '"ترخيص نظام SoliMedical-ERB"',
+        activeLicenseAlert.licenseId || 'LIC-MAIN',
+        '"النظام العام"',
+        `تاريخ الانتهاء: ${activeLicenseAlert.expiryDate} (${activeLicenseAlert.daysRemaining < 0 ? 'منتهي' : `متبقي ${activeLicenseAlert.daysRemaining} يوم`})`,
+        'تجديد وتفعيل مفتاح الاشتراك'
+      ]);
+    }
 
     activeReorderAlerts.forEach(r => {
       rows.push([
@@ -99,7 +121,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `تقرير_التنبيهات_الفورية_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `تقرير_التنبيهات_والتراخيص_${new Date().toISOString().split('T')[0]}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -112,13 +134,19 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       <div className="relative">
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="relative p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700/80 transition-all flex items-center justify-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-          title="شريط التنبيهات الفورية الذكية"
+          className={`relative p-2.5 rounded-xl transition-all flex items-center justify-center cursor-pointer focus:outline-none focus:ring-2 ${
+            activeLicenseAlert
+              ? 'bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-700 focus:ring-amber-500/40'
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700/80 focus:ring-blue-500/40'
+          }`}
+          title={activeLicenseAlert ? `⚠️ ${activeLicenseAlert.message}` : 'شريط التنبيهات الفورية الذكية'}
         >
-          <Bell size={18} className={totalActiveCount > 0 ? 'text-amber-500 animate-bounce' : ''} />
+          <Bell size={18} className={totalActiveCount > 0 ? (activeLicenseAlert ? 'text-amber-600 dark:text-amber-400 animate-pulse' : 'text-amber-500 animate-bounce') : ''} />
           
           {totalActiveCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center border-2 border-white dark:border-slate-900 shadow-md">
+            <span className={`absolute -top-1 -right-1 text-white text-[10px] font-black rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center border-2 border-white dark:border-slate-900 shadow-md ${
+              activeLicenseAlert ? 'bg-gradient-to-r from-red-600 to-amber-600 animate-pulse' : 'bg-red-600'
+            }`}>
               {totalActiveCount > 99 ? '99+' : totalActiveCount}
             </span>
           )}
@@ -134,27 +162,89 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             />
 
             {/* Notification Drawer */}
-            <div className="absolute left-0 md:left-0 top-12 z-50 w-[92vw] sm:w-[420px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden font-sans text-right animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="absolute left-0 md:left-0 top-12 z-50 w-[92vw] sm:w-[440px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden font-sans text-right animate-in fade-in slide-in-from-top-2 duration-200">
               
               {/* Header */}
               <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-lg">
-                    <ShieldAlert size={18} />
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-xl">
+                    <ShieldAlert size={20} />
                   </div>
                   <div>
                     <h3 className="font-bold text-sm leading-none">مركز الإشعارات والتنبيهات الفورية</h3>
-                    <p className="text-[10px] text-slate-400 mt-1">تنبيهات حد الطلب والصلاحيات المحدثة حياً</p>
+                    <p className="text-[10px] text-slate-400 mt-1">تنبيهات الترخيص، حد الطلب وصلاحيات الأدوية</p>
                   </div>
                 </div>
 
                 <button 
                   onClick={() => setIsOpen(false)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer transition-colors"
                 >
                   <X size={18} />
                 </button>
               </div>
+
+              {/* Proactive License Alert Banner (Pinned at the Top if Active) */}
+              {activeLicenseAlert && (
+                <div className={`p-4 border-b flex flex-col gap-2.5 transition-all ${
+                  activeLicenseAlert.severity === 'CRITICAL'
+                    ? 'bg-red-500/10 dark:bg-red-950/40 border-red-300 dark:border-red-900 text-red-950 dark:text-red-100'
+                    : 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-300 dark:border-amber-900 text-amber-950 dark:text-amber-100'
+                }`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5">
+                      <div className={`p-2 rounded-xl shrink-0 ${
+                        activeLicenseAlert.severity === 'CRITICAL' ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'
+                      }`}>
+                        <KeyRound size={18} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-xs">
+                            {activeLicenseAlert.type === 'LICENSE_EXPIRED' ? '⚠️ تنبيه: انتهاء ترخيص النظام' : '🔔 تنبيه استباقي: قرب انتهاء الترخيص'}
+                          </span>
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                            activeLicenseAlert.daysRemaining < 0 
+                              ? 'bg-red-600 text-white' 
+                              : activeLicenseAlert.daysRemaining <= 7 
+                              ? 'bg-red-500 text-white' 
+                              : 'bg-amber-500 text-white'
+                          }`}>
+                            {activeLicenseAlert.daysRemaining < 0 ? 'منتهي' : `متبقي ${activeLicenseAlert.daysRemaining} يوم`}
+                          </span>
+                        </div>
+                        <p className="text-xs mt-1 leading-relaxed opacity-90 font-medium">
+                          {activeLicenseAlert.message}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={(e) => handleDismiss(activeLicenseAlert.id, e)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 cursor-pointer shrink-0"
+                      title="إخفاء التنبيه مؤقتاً"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200/50 dark:border-slate-800/60 text-xs">
+                    <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                      تاريخ الانتهاء: {activeLicenseAlert.expiryDate}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setIsOpen(false);
+                        onNavigate('backups');
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded-xl text-xs shadow-sm flex items-center gap-1.5 transition-all"
+                    >
+                      <Key size={13} />
+                      <span>تجديد وتفعيل الترخيص</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Status Bar */}
               <div className="bg-slate-100 dark:bg-slate-800/80 p-2.5 px-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300">
@@ -190,6 +280,20 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 >
                   الكل ({totalActiveCount})
                 </button>
+                
+                {activeLicenseAlert && (
+                  <button
+                    onClick={() => setActiveTab('LICENSE')}
+                    className={`flex-1 py-2.5 text-center transition-all cursor-pointer border-b-2 ${
+                      activeTab === 'LICENSE'
+                        ? 'border-purple-600 text-purple-600 dark:text-purple-400 bg-white dark:bg-slate-800'
+                        : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    الترخيص (1)
+                  </button>
+                )}
+
                 <button
                   onClick={() => setActiveTab('REORDER')}
                   className={`flex-1 py-2.5 text-center transition-all cursor-pointer border-b-2 ${
@@ -219,7 +323,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   value={searchTerm}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="فلترة التنبيهات باسم الصنف، الكود، أو التشغيلة..."
-                  className="w-full text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full text-xs p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
 
@@ -229,10 +333,47 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   <div className="text-center py-10 space-y-2 text-slate-400">
                     <CheckCircle2 className="mx-auto text-emerald-500" size={36} />
                     <p className="text-xs font-bold text-slate-700 dark:text-slate-300">لا توجد تنبيهات حرجـة حالياً!</p>
-                    <p className="text-[10px] text-slate-400">جميع أرصدة المستودعات آمنة والصلاحيات سارية.</p>
+                    <p className="text-[10px] text-slate-400">الترخيص سارٍ، وجميع أرصدة المستودعات آمنة والصلاحيات سليمة.</p>
                   </div>
                 ) : (
                   <>
+                    {/* Render License Tab View if Selected */}
+                    {activeTab === 'LICENSE' && activeLicenseAlert && (
+                      <div className="p-4 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-900/60 rounded-2xl text-xs space-y-3">
+                        <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300 font-bold">
+                          <KeyRound size={18} />
+                          <span>بيانات ترخيص النظام</span>
+                        </div>
+                        <p className="text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
+                          {activeLicenseAlert.message}
+                        </p>
+                        <div className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-purple-100 dark:border-purple-900/40 text-[11px] space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">معرف العميل:</span>
+                            <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{activeLicenseAlert.customerId}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">تاريخ الانتهاء:</span>
+                            <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{activeLicenseAlert.expiryDate}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">الأيام المتبقية:</span>
+                            <span className="font-mono font-bold text-purple-600">{activeLicenseAlert.daysRemaining} يوم</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setIsOpen(false);
+                            onNavigate('backups');
+                          }}
+                          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-xl text-xs shadow-sm flex items-center justify-center gap-2"
+                        >
+                          <Key size={14} />
+                          <span>الانتقال لشاشة إدارة وتجديد الترخيص</span>
+                        </button>
+                      </div>
+                    )}
+
                     {/* Render Reorder Alerts */}
                     {(activeTab === 'ALL' || activeTab === 'REORDER') && filteredReorder.map(alert => (
                       <div 

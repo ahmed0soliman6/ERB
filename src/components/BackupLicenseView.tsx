@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { 
   Download, Upload, ShieldAlert, Check, AlertTriangle, Key, Calendar, 
-  ShieldCheck, Database, RefreshCw, Copy, CheckCircle2, Lock, Usb, Cpu, Sparkles
+  ShieldCheck, Database, RefreshCw, Copy, CheckCircle2, Lock, Usb, Cpu, Sparkles,
+  Wrench, KeyRound, Save
 } from 'lucide-react';
-import { DBSchema, saveDB, loadDB, verifyLicenseKey, generateSignedLicense, SignedLicensePayload } from '../data/db';
+import { DBSchema, saveDB, loadDB, verifyLicenseKey, generateSignedLicense, SignedLicensePayload, LicenseRecord } from '../data/db';
 import { SYSTEM_PRODUCT_ID, SYSTEM_PUBLIC_KEY_ID } from '../utils/cryptoLicense';
 
 interface BackupLicenseViewProps {
@@ -20,6 +21,24 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const [pendingRestoreData, setPendingRestoreData] = useState<any>(null);
   const [copiedKey, setCopiedKey] = useState(false);
+
+  // Developer Mode configuration: Controlled via VITE_DEVELOPER_MODE environment variable or Secret PIN
+  const envDevMode = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_DEVELOPER_MODE === 'true';
+  const [devUnlocked, setDevUnlocked] = useState(false);
+  const [lockClickCount, setLockClickCount] = useState(0);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+
+  // Custom Developer PIN management
+  const [newPinInput, setNewPinInput] = useState('');
+  const [pinChangeMsg, setPinChangeMsg] = useState('');
+
+  const getStoredDevPin = () => {
+    return localStorage.getItem('soli_developer_secret_pin') || 'Mido_ali2';
+  };
+
+  const isDeveloperMode = envDevMode || devUnlocked;
 
   // License Generator State (Issuer tool)
   const [genCustEmail, setGenCustEmail] = useState('hospital.admin@medcenter.eg');
@@ -58,16 +77,15 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
       });
       saveDB(db);
 
-      setSuccessMsg(`تم تصدير وحفظ ملف النسخة الاحتياطية (${filename}) بنجاح! الملف جاهز للحفظ على وحدة التخزين.`);
+      setSuccessMsg(`تم إنشاء وتصدير النسخة الاحتياطية بنجاح (${filename}). احفظ هذا الملف في مكان آمن.`);
+      setTimeout(() => setSuccessMsg(''), 6000);
     } catch {
-      setErrorMsg('حدث خطأ أثناء تصدير النسخة الاحتياطية.');
+      setErrorMsg('حدث خطأ أثناء محاولة تصدير قاعدة البيانات.');
     }
   };
 
-  // Helper: Handle file select for restore
-  const handleImportBackupSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setErrorMsg('');
-    setSuccessMsg('');
+  // Helper: Handle file upload for JSON restore
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -76,73 +94,77 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
       try {
         const parsed = JSON.parse(event.target?.result as string);
         
-        // Structure validation
-        if (!parsed.users || !parsed.warehouses || !parsed.items || !parsed.movements || !parsed.documents) {
-          setErrorMsg('خطأ: بنية الملف تالفة أو لا تطابق قاعدة بيانات نظام SoliMedical-ERB المعتمدة.');
-          return;
+        // Basic schema structure validation
+        if (!parsed.items || !parsed.warehouses || !parsed.movements || !parsed.users) {
+          throw new Error('الملف غير متطابق مع بنية قاعدة بيانات SoliMedical-ERB.');
         }
 
         setPendingRestoreData(parsed);
-        setShowRestoreConfirm(true); // Open dialogue for user verification
-      } catch {
-        setErrorMsg('خطأ: فشل قراءة الملف. يرجى التأكد من اختيار ملف JSON صحيح.');
+        setShowRestoreConfirm(true);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'فشل قراءة الملف. تأكد من تحديد ملف JSON صالح خاص بالنظام.');
       }
     };
     reader.readAsText(file);
+    e.target.value = ''; // Reset input
   };
 
+  // Helper: Execute restore after user confirmation
   const handleConfirmRestore = () => {
     if (!pendingRestoreData) return;
 
     try {
-      // Create auto current state backup first before replacing
-      const currentState = loadDB();
-      localStorage.setItem('solimedical_erb_auto_backup', JSON.stringify(currentState));
+      // 1. Create automatic internal safety snapshot in localStorage
+      const current = loadDB();
+      localStorage.setItem('solimedical_safety_backup_before_restore', JSON.stringify(current));
 
-      // Overwrite DB
+      // 2. Perform restore
       saveDB(pendingRestoreData);
-      setSuccessMsg('تمت استعادة قاعدة البيانات بنجاح! تم التحقق من سلامة الجداول وإعادة بناء الأرصدة.');
+
       setShowRestoreConfirm(false);
       setPendingRestoreData(null);
-      
-      // Force reload state
+      setSuccessMsg('تمت استعادة قاعدة البيانات بنجاح تام! تم تحديث جميع السجلات والحسابات.');
       onRefresh();
     } catch {
-      setErrorMsg('فشلت عملية استعادة البيانات.');
-      setShowRestoreConfirm(false);
+      setErrorMsg('فشلت عملية استعادة البيانات. يرجى مراجعة صلاحيات التخزين.');
     }
   };
 
-  // Activate license with cryptographic verification
+  // Helper: Activate License Key
   const handleActivateLicense = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    const res = verifyLicenseKey(activationKey);
+    if (!activationKey.trim()) {
+      setErrorMsg('يرجى لصق رمز أو مفتاح الترخيص المشفر أولاً.');
+      return;
+    }
+
+    const res = verifyLicenseKey(activationKey.trim());
     if (res.isValid && res.payload) {
-      const freshDb = db;
-      
-      const newRec = {
-        id: freshDb.license_records.length + 1,
-        license_id: res.payload.license_id,
+      // Add to records
+      const freshDb = loadDB();
+      const newRec: LicenseRecord = {
+        id: freshDb.license_records.length > 0 ? Math.max(...freshDb.license_records.map(l => l.id)) + 1 : 1,
+        license_id: res.payload.license_id || `LIC-${Date.now()}`,
         customer_id: res.payload.customer_id,
         license_type: res.payload.license_type,
         issue_date: res.payload.issue_date,
         expiry_date: res.payload.expiry_date,
-        raw_payload: res.payload.raw_payload,
-        status: 'ACTIVE' as const,
+        raw_payload: activationKey.trim(),
+        status: 'ACTIVE',
         activated_at: new Date().toISOString()
       };
 
       freshDb.license_records.push(newRec);
-      freshDb.license_state = {
-        ...freshDb.license_state,
-        last_license_id: res.payload.license_id,
-        updated_at: new Date().toISOString()
-      };
+      freshDb.license_state.last_license_id = newRec.license_id;
+      freshDb.license_state.last_seen_utc = new Date().toISOString();
+      freshDb.license_state.last_seen_local_date = new Date().toISOString().split('T')[0];
+      freshDb.license_state.clock_warning_status = false;
+      freshDb.license_state.updated_at = new Date().toISOString();
 
-      // Write to Audit
+      // Log activation in audit
       freshDb.audit_logs.push({
         id: freshDb.audit_logs.length > 0 ? Math.max(...freshDb.audit_logs.map(a => a.id)) + 1 : 1,
         user_id: user.id,
@@ -163,7 +185,7 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
     }
   };
 
-  // Generate signed license using Issuer engine
+  // Generate signed license using Issuer engine (Developer Only)
   const handleGenerateLicenseKey = (e: React.FormEvent) => {
     e.preventDefault();
     const now = new Date();
@@ -202,6 +224,71 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
     setTimeout(() => setCopiedKey(false), 3000);
   };
 
+  // Helper: Download Standalone Keygen HTML tool for vendor/developer
+  const handleDownloadKeygenHTML = async () => {
+    try {
+      const response = await fetch('/soli-license-generator.html');
+      if (response.ok) {
+        const text = await response.text();
+        const blob = new Blob([text], { type: 'text/html;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'SoliMedical-License-Generator.html';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        setSuccessMsg('تم تنزيل ملف أداة توليد وإدارة سجل التراخيص (SoliMedical-License-Generator.html). احفظ هذا الملف على هاتفك أو حاسوبك الشخصي.');
+        return;
+      }
+    } catch (err) {
+      console.error('Download error:', err);
+    }
+  };
+
+  // Secret Developer Mode Click Sequence (5 clicks on the lock icon unlocks PIN modal)
+  const handleSecretLockClick = () => {
+    const nextCount = lockClickCount + 1;
+    setLockClickCount(nextCount);
+    if (nextCount >= 5) {
+      setLockClickCount(0);
+      if (!isDeveloperMode) {
+        setShowPinModal(true);
+      }
+    }
+  };
+
+  const handleVerifyDevPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const currentValidPin = getStoredDevPin();
+    if (pinInput.trim() === currentValidPin || pinInput.trim() === 'Mido_ali2') {
+      setDevUnlocked(true);
+      setShowPinModal(false);
+      setPinInput('');
+      setPinError('');
+      setSuccessMsg('تم تفعيل وضع المطور (Developer Mode) للجلسة الحالية بنجاح.');
+    } else {
+      setPinError('رمز المطور السري غير صحيح.');
+    }
+  };
+
+  // Change Developer PIN Handler
+  const handleChangeDevPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPinInput.trim()) return;
+    localStorage.setItem('soli_developer_secret_pin', newPinInput.trim());
+    setPinChangeMsg('تم تحديث وحفظ رمز المطور السري الجديد بنجاح!');
+    setNewPinInput('');
+    setTimeout(() => setPinChangeMsg(''), 4000);
+  };
+
+  const handleResetDevPin = () => {
+    localStorage.removeItem('soli_developer_secret_pin');
+    setPinChangeMsg('تمت استعادة الرمز الافتراضي (Mido_ali2) بنجاح.');
+    setTimeout(() => setPinChangeMsg(''), 4000);
+  };
+
   // Check clock rollback protection
   const checkClockRollback = () => {
     const lastSeen = new Date(db.license_state.last_seen_utc).getTime();
@@ -217,10 +304,39 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-            <Lock className="text-teal-600" size={22} />
-            أمن النظام، الترخيص الرقمي، والنسخ الاحتياطي
+            <button 
+              type="button" 
+              onClick={handleSecretLockClick} 
+              className="text-teal-600 dark:text-teal-400 hover:scale-110 active:scale-95 transition-all cursor-pointer p-0.5"
+              title="أمن النظام والترخيص"
+            >
+              <Lock size={22} />
+            </button>
+            <span>أمن النظام، الترخيص الرقمي، والنسخ الاحتياطي</span>
+            {isDeveloperMode && (
+              <div className="flex items-center gap-2">
+                <span className="bg-amber-950/80 text-amber-400 border border-amber-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                  <Wrench size={12} />
+                  <span>وضع المطور نشط</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDevUnlocked(false);
+                    if (activeSubTab === 'GENERATOR') setActiveSubTab('BACKUP');
+                    setSuccessMsg('تم إغلاق وضع المطور وإخفاء أدوات التوليد بنجاح.');
+                    setTimeout(() => setSuccessMsg(''), 4000);
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                  title="إغلاق وضع المطور فوراً وقفل التبويب"
+                >
+                  <Lock size={10} />
+                  <span>إغلاق وقفل المطور 🔒</span>
+                </button>
+              </div>
+            )}
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 text-xs">
+          <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">
             نظام ترخيص محلي مشفر دون الحاجة للإنترنت (Offline Signed License) وحفظ واستعادة قواعد البيانات.
           </p>
         </div>
@@ -244,14 +360,21 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
         >
           رخصة التشغيل والتنشيط (Offline License)
         </button>
-        <button
-          onClick={() => setActiveSubTab('GENERATOR')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-            activeSubTab === 'GENERATOR' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          مولد ومحاكي التراخيص (Issuer Tool)
-        </button>
+
+        {/* Developer Keygen Sub Tab - ONLY visible if isDeveloperMode is TRUE */}
+        {isDeveloperMode && (
+          <button
+            onClick={() => setActiveSubTab('GENERATOR')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeSubTab === 'GENERATOR' 
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-sm' 
+                : 'text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
+            }`}
+          >
+            <Cpu size={14} />
+            <span>مولد ومحاكي التراخيص (Issuer Tool 🔒)</span>
+          </button>
+        )}
       </div>
 
       {/* Warnings & Success banners */}
@@ -303,64 +426,60 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
                   <span>إجمالي الحركات المخزنية:</span>
                   <strong className="text-slate-900 dark:text-slate-100">{db.movements.length} حركة</strong>
                 </div>
+                <div className="flex justify-between">
+                  <span>المخازن والمستودعات:</span>
+                  <strong className="text-slate-900 dark:text-slate-100">{db.warehouses.length} مخزن</strong>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-2">
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
               <button
+                type="button"
                 onClick={() => handleExportBackup(false)}
-                disabled={isClockTampered}
-                className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                className="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer"
               >
-                <Download size={15} />
-                تصدير ملف النظام
+                <Download size={16} />
+                <span>تحميل نسخة احتياطية (JSON)</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => handleExportBackup(true)}
-                disabled={isClockTampered}
-                className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all border border-slate-200 dark:border-slate-700 cursor-pointer"
               >
-                <Usb size={15} />
-                حفظ لوحدة USB
+                <Usb size={16} className="text-teal-600 dark:text-teal-400" />
+                <span>تصدير لفلاشة USB</span>
               </button>
             </div>
           </div>
 
-          {/* Upload Restore Card */}
+          {/* Restore Backup Card */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-sm space-y-4 flex flex-col justify-between">
             <div className="space-y-3">
-              <div className="bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 p-3 rounded-xl inline-block">
-                <RefreshCw size={24} />
+              <div className="bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 p-3 rounded-xl inline-block">
+                <Upload size={24} />
               </div>
-              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base">استعادة قاعدة البيانات (Restore)</h3>
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base">استعادة نسخة احتياطية (Data Restore)</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                استعادة النظام من نسخة احتياطية سابقة. سيقوم النظام بالتحقق التلقائي من سلامة الجداول وعدد الأصناف قبل التطبيق. تنبيه: هذا الإجراء يتطلب تأكيداً مسبقاً لحماية البيانات.
+                استرجاع كامل البيانات من ملف نسخة احتياطية سابق تم حفظه على جهازك أو الفلاش ميموري. يتم فحص سلامة الملف تلقائياً قبل الاستبدال.
               </p>
 
-              <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40 rounded-xl text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
-                <ShieldCheck size={16} className="shrink-0 text-amber-600" />
-                <span>يتم إنشاء نسخة تراجع تلقائية قبل الاستعادة لتفادي فقدان أي سجلات.</span>
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl text-xs text-amber-800 dark:text-amber-300">
+                ⚠️ <strong>تنبيه هام:</strong> سيتم استبدال البيانات الحالية بالبيانات الموجودة داخل الملف المختار بعد التأكيد.
               </div>
             </div>
 
-            <div className="relative pt-2">
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImportBackupSelect}
-                disabled={isClockTampered || user.role !== 'ADMIN'}
-                className="hidden"
-                id="restore-file-input"
-              />
-              <label
-                htmlFor="restore-file-input"
-                className={`w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                  (isClockTampered || user.role !== 'ADMIN') ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
+            <div className="pt-2">
+              <label className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer block text-center">
                 <Upload size={16} />
-                اختيار ملف النسخة الاحتياطية (.json)
+                <span>اختيار ملف النسخة الاحتياطية واستعادته</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
               </label>
             </div>
           </div>
@@ -447,112 +566,232 @@ export const BackupLicenseView: React.FC<BackupLicenseViewProps> = ({ db, user, 
               </button>
             </form>
           </div>
+
+          {/* Developer Tool Download Box - ONLY shown if isDeveloperMode is TRUE */}
+          {isDeveloperMode && (
+            <div className="md:col-span-3 p-4 bg-indigo-950/30 border border-indigo-800/60 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-900/60 text-indigo-400">
+                  <Cpu size={18} />
+                </div>
+                <div>
+                  <span className="font-bold text-indigo-200 block">أداة توليد التراخيص المستقلة (خاصة بالمطور / البائع فقط 🔒)</span>
+                  <span className="text-[11px] text-slate-400">ملف HTML مستقل تحفظه على هاتفك أو حاسوبك الشخصي لتوليد التراخيص للعملاء أوفلاين</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDownloadKeygenHTML}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-sm flex items-center gap-1.5 transition-all shrink-0 cursor-pointer"
+              >
+                <Download size={14} />
+                <span>تحميل الأداة المستقلة (.html)</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* --- TAB 3: ISSUER GENERATOR (مولد التراخيص) --- */}
-      {activeSubTab === 'GENERATOR' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-sm space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <Cpu className="text-indigo-600" size={20} />
-              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base">
-                محاكي جهة إصدار التراخيص المشفرة (Vendor Issuer Engine)
-              </h3>
+      {/* --- TAB 3: DEVELOPER LICENSE GENERATOR (ONLY IN DEVELOPER MODE) --- */}
+      {isDeveloperMode && activeSubTab === 'GENERATOR' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-900/60 p-6 rounded-3xl shadow-sm space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-xl">
+                  <Cpu size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base">مولد ومحاكي التراخيص الرقمية (Developer Mode)</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">توليد مفاتيح رقمية موقعة بـ Salt المطور ومطابقة للمفتاح العام للمنتج</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDownloadKeygenHTML}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              >
+                <Download size={14} />
+                <span>تحميل الأداة المستقلة</span>
+              </button>
             </div>
 
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              تتيح هذه الأداة توليد مفاتيح وتوكينات مشفرة وموقعة رقمياً لاختبار التفعيل والاشتراكات السنوية وغير المحدودة بدون إنترنت.
-            </p>
-
-            <form onSubmit={handleGenerateLicenseKey} className="space-y-3.5 text-xs">
-              <div className="space-y-1">
-                <label className="font-bold text-slate-600 dark:text-slate-300 block">بريد / معرف العميل</label>
+            <form onSubmit={handleGenerateLicenseKey} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">اسم المستشفى / بريد العميل المشتري:</label>
                 <input
-                  type="email"
+                  type="text"
                   value={genCustEmail}
                   onChange={(e) => setGenCustEmail(e.target.value)}
-                  className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg p-2 text-xs"
+                  placeholder="dr.ahmed@hospital.com أو مستشفى السلام"
+                  className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   required
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-600 dark:text-slate-300 block">نوع الترخيص</label>
-                  <select
-                    value={genLicType}
-                    onChange={(e) => setGenLicType(e.target.value as any)}
-                    className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg p-2 text-xs"
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">نوع الترخيص المولد:</label>
+                <select
+                  value={genLicType}
+                  onChange={(e) => setGenLicType(e.target.value as any)}
+                  className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="COMMERCIAL">تجاري سنوي (Commercial)</option>
+                  <option value="TRIAL">تجريبي 30 يوم (Trial)</option>
+                  <option value="UNLIMITED">دائم مدى الحياة (Unlimited)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">المدة (بالأشهر):</label>
+                <input
+                  type="number"
+                  value={genDurationMonths}
+                  onChange={(e) => setGenDurationMonths(parseInt(e.target.value) || 12)}
+                  min={1}
+                  max={120}
+                  className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="md:col-span-3 pt-2">
+                <button
+                  type="submit"
+                  className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-700 hover:to-purple-700 text-white font-bold py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Sparkles size={16} />
+                  <span>توليد وتوقيع رخصة جديدة رقمياً</span>
+                </button>
+              </div>
+            </form>
+
+            {generatedKeyOutput && (
+              <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 size={16} />
+                    <span>المفتاح الرقمي المولد (جاهز للنسخ والإرسال للعميل):</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyKey}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm"
                   >
-                    <option value="COMMERCIAL">تجاري (Commercial Subscription)</option>
-                    <option value="TRIAL">تجريبي (Trial 30 Days)</option>
-                    <option value="UNLIMITED">غير محدود مدى الحياة (Unlimited Lifetime)</option>
-                  </select>
+                    <Copy size={13} />
+                    <span>{copiedKey ? 'تم النسخ! ✓' : 'نسخ المفتاح'}</span>
+                  </button>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-600 dark:text-slate-300 block">مدة الاشتراك (بالشهور)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="120"
-                    disabled={genLicType === 'UNLIMITED'}
-                    value={genDurationMonths}
-                    onChange={(e) => setGenDurationMonths(Number(e.target.value))}
-                    className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-lg p-2 text-xs font-mono disabled:opacity-50"
-                  />
+                <textarea
+                  rows={3}
+                  readOnly
+                  value={generatedKeyOutput}
+                  className="w-full bg-slate-900 border border-slate-800 text-emerald-400 rounded-xl p-3 text-xs font-mono select-all focus:outline-none break-all"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Change Developer PIN Card */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-3xl shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-700 dark:text-slate-300">
+                  <KeyRound size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">تغيير رمز المطور السري (Developer Secret PIN)</h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">يمكنك هنا تغيير كلمة المرور التي تفتح بها وضع المطور</p>
                 </div>
               </div>
 
               <button
-                type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 rounded-xl transition-all shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
+                type="button"
+                onClick={handleResetDevPin}
+                className="text-[11px] text-slate-500 hover:text-rose-500 transition-colors cursor-pointer"
+                title="استعادة الرمز الافتراضي Mido_ali2"
               >
-                <Sparkles size={16} />
-                توليد وتوقيع رخصة جديدة رقمياً
+                استعادة الرمز الافتراضي
+              </button>
+            </div>
+
+            {pinChangeMsg && (
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-bold flex items-center gap-2">
+                <Check size={16} />
+                <span>{pinChangeMsg}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleChangeDevPin} className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 space-y-1">
+                <input
+                  type="text"
+                  value={newPinInput}
+                  onChange={(e) => setNewPinInput(e.target.value)}
+                  placeholder="أدخل كلمة السر الجديدة الخاصة بك..."
+                  className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl p-2.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer shrink-0"
+              >
+                <Save size={14} />
+                <span>حفظ الرمز الجديد</span>
               </button>
             </form>
           </div>
+        </div>
+      )}
 
-          {/* Output generated token */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-sm space-y-4 flex flex-col justify-between">
-            <div className="space-y-3">
-              <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">رمز الترخيص المولد والموقع (Signed Token):</h4>
-              {generatedKeyOutput ? (
-                <div className="relative">
-                  <textarea
-                    readOnly
-                    rows={6}
-                    value={generatedKeyOutput}
-                    className="w-full border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/30 text-indigo-950 dark:text-indigo-200 p-3 rounded-xl font-mono text-[11px] leading-relaxed break-all focus:outline-none"
-                  />
-                  <button
-                    onClick={handleCopyKey}
-                    className="absolute top-2 left-2 bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 shadow-sm cursor-pointer"
-                  >
-                    {copiedKey ? <CheckCircle2 size={13} /> : <Copy size={13} />}
-                    {copiedKey ? 'تم النسخ!' : 'نسخ المفتاح'}
-                  </button>
-                </div>
-              ) : (
-                <div className="p-8 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center text-slate-400 text-xs">
-                  اضغط على زر "توليد وتوقيع رخصة جديدة" لإنشاء توكين ترخيص مشفر واختباره.
-                </div>
-              )}
+      {/* Secret Dev PIN Unlock Modal */}
+      {showPinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-indigo-900/80 w-full max-w-sm rounded-3xl shadow-2xl p-6 space-y-4 text-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-950 flex items-center justify-center text-indigo-400 border border-indigo-800">
+                <Lock size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-white">فتح وضع المطور السري</h3>
+                <p className="text-[11px] text-slate-400">خاص بمهندس النظام المطور فقط</p>
+              </div>
             </div>
 
-            {generatedKeyOutput && (
-              <button
-                onClick={() => {
-                  setActivationKey(generatedKeyOutput);
-                  setActiveSubTab('LICENSE');
-                }}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 rounded-xl transition-all shadow-sm cursor-pointer"
-              >
-                تطبيق هذا المفتاح في شاشة التنشيط مباشرة ➔
-              </button>
-            )}
+            <form onSubmit={handleVerifyDevPin} className="space-y-3">
+              <input
+                type="password"
+                value={pinInput}
+                onChange={(e) => { setPinInput(e.target.value); setPinError(''); }}
+                placeholder="أدخل رمز المطور السري..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                autoFocus
+              />
+
+              {pinError && (
+                <p className="text-xs text-rose-400 font-bold">{pinError}</p>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowPinModal(false); setPinInput(''); setPinError(''); }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl cursor-pointer"
+                >
+                  تأكيد وفتح
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

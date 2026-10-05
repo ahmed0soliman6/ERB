@@ -6,6 +6,9 @@ export interface User {
   username: string;
   display_name: string;
   password_hash: string;
+  password_plain?: string;
+  email?: string;
+  phone?: string;
   role: 'ADMIN' | 'STORE_MANAGER' | 'STORE_USER' | 'VIEWER';
   is_active: boolean;
   allowed_warehouses: number[]; // empty means all warehouses (or ADMIN)

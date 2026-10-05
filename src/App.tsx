@@ -7,6 +7,7 @@ import { InventoryCountingView } from './components/InventoryCountingView';
 import { ReportsView } from './components/ReportsView';
 import { UsersView } from './components/UsersView';
 import { BackupLicenseView } from './components/BackupLicenseView';
+import { SettingsView } from './components/SettingsView';
 import { NotificationCenter } from './components/NotificationCenter';
 import { 
   HeartPulse, 
@@ -24,7 +25,8 @@ import {
   X,
   Clock,
   Sun,
-  Moon
+  Moon,
+  Settings
 } from 'lucide-react';
 
 export default function App() {
@@ -124,8 +126,12 @@ export default function App() {
         setLoginError('خطأ: حساب المستخدم هذا معطل حالياً من قِبل المسؤول.');
         return;
       }
-      // Demo authentication: allow password "123" or matching credentials
-      if (loginPassword === '123' || loginPassword === 'admin123' || loginPassword === 'manager123' || loginPassword === 'user123' || loginPassword === 'viewer123') {
+      // Check if password matches custom changed password or demo default passwords
+      const isPasswordValid = 
+        (foundUser.password_plain && loginPassword === foundUser.password_plain) ||
+        (!foundUser.password_plain && (loginPassword === '123' || loginPassword === `${foundUser.username}123` || loginPassword === 'admin123' || loginPassword === 'manager123' || loginPassword === 'user123' || loginPassword === 'viewer123'));
+
+      if (isPasswordValid) {
         setCurrentUser(foundUser);
         sessionStorage.setItem('solimedical_erb_user', JSON.stringify(foundUser));
         setLoginUsername('');
@@ -255,14 +261,15 @@ export default function App() {
     { id: 'counts', name: 'الجرد والتسويات', icon: <ClipboardCheck size={18} /> },
     { id: 'reports', name: 'التقارير والتحليلات', icon: <BarChart2 size={18} /> },
     { id: 'users', name: 'المستخدمين والصلاحيات', icon: <Users size={18} /> },
+    { id: 'settings', name: 'الإعدادات والحساب', icon: <Settings size={18} /> },
     { id: 'backups', name: 'الأمن، النسخ والترخيص', icon: <Database size={18} /> },
   ];
 
   return (
-    <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden transition-colors duration-200">
+    <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200 relative">
       
-      {/* Sidebar for Desktop / Mobile */}
-      <aside className={`fixed inset-y-0 right-0 z-40 w-64 bg-white dark:bg-slate-900 border-l border-slate-200/80 dark:border-slate-800 flex flex-col justify-between shadow-sm transition-transform duration-200 lg:static lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+      {/* Sidebar for Desktop / Mobile - Fixed position */}
+      <aside className={`fixed inset-y-0 right-0 z-40 w-64 h-screen bg-white dark:bg-slate-900 border-l border-slate-200/80 dark:border-slate-800 flex flex-col justify-between shadow-sm transition-transform duration-200 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}>
         
         {/* Brand & Navigation */}
         <div className="flex flex-col">
@@ -278,18 +285,18 @@ export default function App() {
             </div>
             
             {/* Close Mobile Sidebar */}
-            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+            <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer">
               <X size={18} />
             </button>
           </div>
 
           {/* Navigation Items */}
-          <nav className="p-4 space-y-1.5 flex-1">
+          <nav className="p-4 space-y-1.5 flex-1 overflow-y-auto">
             {sidebarItems.map((item) => (
               <button
                 key={item.id}
                 onClick={() => { setCurrentView(item.id); setSidebarOpen(false); }}
-                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition-all ${
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   currentView === item.id 
                     ? 'bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 shadow-sm border-r-4 border-blue-600 dark:border-blue-500' 
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-white'
@@ -303,21 +310,26 @@ export default function App() {
           </nav>
         </div>
 
-        {/* User Info & Logout Button */}
+        {/* User Info & Settings / Logout Button */}
         <div className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-3 bg-slate-50/70 dark:bg-slate-900/90">
-          <div className="flex items-center gap-2.5 text-xs">
-            <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold">
+          <button
+            onClick={() => { setCurrentView('settings'); setSidebarOpen(false); }}
+            className="w-full flex items-center gap-2.5 text-xs text-right p-1.5 -m-1.5 rounded-xl hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-all group cursor-pointer"
+            title="انقر لتعديل بيانات حسابك وكلمة المرور"
+          >
+            <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold shrink-0">
               {currentUser.display_name.slice(0, 1)}
             </div>
-            <div className="min-w-0">
-              <span className="font-bold text-slate-800 dark:text-slate-200 block truncate">{currentUser.display_name}</span>
+            <div className="min-w-0 flex-1">
+              <span className="font-bold text-slate-800 dark:text-slate-200 block truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">{currentUser.display_name}</span>
               <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-mono">@{currentUser.username} ({currentUser.role})</span>
             </div>
-          </div>
+            <Settings size={14} className="text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 shrink-0" />
+          </button>
           
           <button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 bg-white dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 py-2 rounded-xl text-xs font-bold transition-all shadow-sm"
+            className="w-full flex items-center justify-center gap-2 bg-white dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
           >
             <LogOut size={14} />
             تسجيل الخروج الآمن
@@ -325,13 +337,21 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Main Container */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+      {/* Mobile Sidebar Overlay Backdrop */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-30 lg:hidden animate-in fade-in"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Main Content Area - with margin offset for fixed sidebar */}
+      <div className="flex-1 flex flex-col min-w-0 lg:mr-64 min-h-screen">
         
-        {/* Desktop/Mobile header */}
-        <header className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 h-16 flex items-center justify-between px-6 sticky top-0 z-30 shadow-sm shrink-0 transition-colors">
+        {/* Desktop/Mobile Sticky Header */}
+        <header className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 h-16 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-30 shadow-xs shrink-0 transition-colors">
           <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer">
               <Menu size={22} />
             </button>
             <div className="hidden lg:flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
@@ -355,7 +375,7 @@ export default function App() {
             {/* Dark / Light Mode Switcher Button */}
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700/80 transition-all flex items-center gap-1.5 text-xs font-bold"
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700/80 transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer"
               title={theme === 'dark' ? 'تفعيل الوضع النهاري (Light Mode)' : 'تفعيل الوضع الليلي (Dark Mode)'}
             >
               {theme === 'dark' ? (
@@ -370,21 +390,11 @@ export default function App() {
                 </>
               )}
             </button>
-
-            <div className="hidden md:flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-full text-[10px] text-slate-500 dark:text-slate-400 font-bold border border-slate-200/60 dark:border-slate-700/80">
-              <Clock size={12} className="text-slate-400 dark:text-slate-500" />
-              <span>آخر دخول: {currentUser.last_login_at ? new Date(currentUser.last_login_at).toLocaleString('ar-EG') : 'الآن'}</span>
-            </div>
-
-            <div className="flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 px-3 py-1.5 rounded-full text-[10px] font-bold border border-emerald-200/60 dark:border-emerald-900/60">
-              <Lock size={12} />
-              <span>مؤمن محلياً</span>
-            </div>
           </div>
         </header>
 
         {/* Dynamic content view rendering */}
-        <main className="flex-grow p-6">
+        <main className="flex-grow p-3 sm:p-5 lg:p-6 max-w-full overflow-x-hidden">
           {currentView === 'dashboard' && (
             <DashboardView 
               db={db} 
@@ -429,6 +439,20 @@ export default function App() {
               db={db} 
               user={currentUser} 
               onRefresh={handleRefresh} 
+            />
+          )}
+          {currentView === 'settings' && (
+            <SettingsView 
+              db={db} 
+              user={currentUser} 
+              onUserUpdate={(updatedUser) => {
+                setCurrentUser(updatedUser);
+                sessionStorage.setItem('solimedical_erb_user', JSON.stringify(updatedUser));
+                handleRefresh();
+              }}
+              onRefresh={handleRefresh}
+              theme={theme}
+              onToggleTheme={toggleTheme}
             />
           )}
           {currentView === 'backups' && (

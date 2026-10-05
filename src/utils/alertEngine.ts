@@ -33,12 +33,25 @@ export interface ExpiryAlert {
   categoryName: string;
 }
 
+export interface LicenseAlert {
+  id: string;
+  type: 'LICENSE_EXPIRED' | 'LICENSE_EXPIRING_SOON';
+  severity: 'CRITICAL' | 'WARNING';
+  licenseId: string;
+  customerId: string;
+  licenseType: string;
+  expiryDate: string;
+  daysRemaining: number;
+  message: string;
+}
+
 export interface NotificationSummary {
   totalCount: number;
   criticalCount: number;
   warningCount: number;
   reorderAlerts: StockAlert[];
   expiryAlerts: ExpiryAlert[];
+  licenseAlert?: LicenseAlert | null;
 }
 
 // Default seed batches for expiry tracking simulation if no explicit document batch line exists yet
@@ -216,18 +229,60 @@ export function computeSmartNotifications(
     }
   });
 
+  // 3. Proactive License Expiry Check (30-day proactive warning for Admin / Store Managers)
+  let licenseAlert: LicenseAlert | null = null;
+  if (userRole === 'ADMIN' || userRole === 'STORE_MANAGER') {
+    const activeLicense = db.license_records && db.license_records.length > 0
+      ? db.license_records[db.license_records.length - 1]
+      : null;
+
+    if (activeLicense && activeLicense.expiry_date && activeLicense.license_type !== 'UNLIMITED') {
+      const expTime = new Date(activeLicense.expiry_date);
+      expTime.setHours(0, 0, 0, 0);
+      const diffMs = expTime.getTime() - today.getTime();
+      const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+      // Alert proactively if expired or expiring within 30 days
+      if (daysRemaining <= 30) {
+        const isExpired = daysRemaining < 0;
+        licenseAlert = {
+          id: `license-expiry-${activeLicense.license_id || 'active'}`,
+          type: isExpired ? 'LICENSE_EXPIRED' : 'LICENSE_EXPIRING_SOON',
+          severity: isExpired || daysRemaining <= 7 ? 'CRITICAL' : 'WARNING',
+          licenseId: activeLicense.license_id,
+          customerId: activeLicense.customer_id,
+          licenseType: activeLicense.license_type,
+          expiryDate: activeLicense.expiry_date,
+          daysRemaining,
+          message: isExpired
+            ? `انتهت صلاحية ترخيص النظام بتاريخ ${activeLicense.expiry_date}! يرجى تفعيل مفتاح تجديد لمواصلة العمليات.`
+            : `تنبيه استباقي: سينتهي ترخيص النظام خلال ${daysRemaining} يوم (بتاريخ ${activeLicense.expiry_date}). يرجى تجديد الاشتراك لتفادي توقف العمليات.`
+        };
+      }
+    }
+  }
+
   // Sort alerts by urgency
   reorderAlerts.sort((a, b) => (a.severity === 'CRITICAL' ? -1 : 1) - (b.severity === 'CRITICAL' ? -1 : 1));
   expiryAlerts.sort((a, b) => a.daysRemaining - b.daysRemaining);
 
-  const criticalCount = reorderAlerts.filter(a => a.severity === 'CRITICAL').length + expiryAlerts.filter(a => a.severity === 'CRITICAL').length;
-  const warningCount = reorderAlerts.filter(a => a.severity === 'WARNING').length + expiryAlerts.filter(a => a.severity === 'WARNING').length;
+  const licenseCritical = licenseAlert && licenseAlert.severity === 'CRITICAL' ? 1 : 0;
+  const licenseWarning = licenseAlert && licenseAlert.severity === 'WARNING' ? 1 : 0;
+
+  const criticalCount = reorderAlerts.filter(a => a.severity === 'CRITICAL').length + 
+                        expiryAlerts.filter(a => a.severity === 'CRITICAL').length + 
+                        licenseCritical;
+
+  const warningCount = reorderAlerts.filter(a => a.severity === 'WARNING').length + 
+                       expiryAlerts.filter(a => a.severity === 'WARNING').length + 
+                       licenseWarning;
 
   return {
-    totalCount: reorderAlerts.length + expiryAlerts.length,
+    totalCount: reorderAlerts.length + expiryAlerts.length + (licenseAlert ? 1 : 0),
     criticalCount,
     warningCount,
     reorderAlerts,
-    expiryAlerts
+    expiryAlerts,
+    licenseAlert
   };
 }
